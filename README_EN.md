@@ -1,9 +1,11 @@
-# 🛡️ TeleGuard (v5.3)
+# 🛡️ TeleGuard (v5.4)
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/jikssha/telegram_private_chatbot)
 ![GitHub stars](https://img.shields.io/github/stars/jikssha/telegram_private_chatbot?style=social)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
-[![Telegram](https://img.shields.io/badge/Telegram-DM-blue?style=social&logo=telegram)](https://t.me/vaghr_wegram_bot)[🇺🇸 English](README_EN.md) | [🇨🇳 简体中文](README.md)
+[![Telegram](https://img.shields.io/badge/Telegram-DM-blue?style=social&logo=telegram)](https://t.me/vaghr_wegram_bot)
+
+[🇺🇸 English](README_EN.md) | [🇨🇳 简体中文](README.md)
 
 **Telegram Private Chatbot** is a high-performance, two-way private messaging bot based on **Cloudflare Workers**. It is designed to solve the problem of spam harassment on Telegram, featuring a zero-latency local CAPTCHA verification system, a powerful set of administrator commands, and a seamless message forwarding experience.
 
@@ -12,12 +14,12 @@ Deploy a free, enterprise-grade customer service system utilizing Cloudflare's p
 ---
 
 <details>
-<summary>📢 <b>v5.3 Update Highlights (2026-05-16)</b></summary>
+<summary>📢 <b>v5.4 Update Highlights (2026-05-16)</b></summary>
    
 ### New Features:
-- **Keyword Filtering System**: Added a dual-layer filtering system (hardcoded + KV dynamic word list) that supports intercepting text messages and media captions.
-- **Real-time Management**: Added admin commands (`/addword`, `/delword`, `/listwords`) to update the blacklist dynamically without redeploying.
-- **Performance Optimization**: Introduced an in-memory caching mechanism to minimize KV read operations, ensuring high-speed responses under load.
+- **Keyword Filtering System**: Added a dual-layer filtering system (hardcoded + KV dynamic word list) supporting text and media caption interception.
+- **Dynamic Management**: Added admin commands (`/addword`, `/delword`, `/listwords`) for real-time blacklist maintenance.
+- **Performance**: Introduced in-memory caching for high-speed keyword lookups.
 </details>
 
 ---
@@ -26,9 +28,11 @@ Deploy a free, enterprise-grade customer service system utilizing Cloudflare's p
 
 * [✨ Key Features](#-key-features)
 * [🛠️ Administrator Commands](#-administrator-commands)
-* [🚫 Keyword Filtering System](#-keyword-filtering-system)
 * [🚀 Deployment Tutorial](#-deployment-tutorial)
-* [❓ FAQ](#-faq)
+    *[Method 1: One-Click Deploy via GitHub (Recommended)](#method-1-one-click-deploy-via-github-recommended-)
+    * [Method 2: Manual Deployment](#method-2-manual-deployment-simple--direct)
+    * [Final Step: Activate Webhook](#final-step-activate-webhook-crucial)
+*[❓ FAQ](#-faq)
 * [📈 Star History](#-star-history)
 
 ---
@@ -37,12 +41,13 @@ Deploy a free, enterprise-grade customer service system utilizing Cloudflare's p
 
 | Feature | Description |
 | :--- | :--- |
-| **⚡ Zero-Latency Verification** | Uses a local curated trivia database. Verifies instantly with a 100% success rate. |
-| **🚫 Keyword Filtering** | Dual-layer filtering (hardcoded + dynamic KV) with support for `Caption` filtering. Manage rules via chat commands. |
-| **🛡️ Smart Anti-Spam** | Short ID mechanism for reliable callback handling. 30-day disturbance-free period after verification. |
-| **💬 Topic Group Management** | Automatically creates separate topics for private chat users for organized management. |
-| **👮 Invisible Command System** | Automatically intercepts `/` commands sent by users. Admin commands work only in the admin group. |
-| **☁️ Serverless** | Runs entirely on Cloudflare Workers. Zero cost, server-free, and handles high concurrency. |
+| **⚡ Zero-Latency Verification** | Uses a **local curated trivia database**. Verifies instantly, with a 100% success rate. |
+| **🛡️ Smart Anti-Spam** | **Short ID mechanism** provides a **30-day disturbance-free period** after verification. |
+| **💬 Topic Group Management** | Utilizes **Telegram Forum Topics** to automatically create separate topics for each user for organized management. |
+| **👮 Invisible Command System** | Automatically **intercepts** `/` commands sent by users. Admin commands are only effective within the admin group. |
+| **🔒 Permission Control** | Powerful command set: Supports **Ban (/ban)**, **Unban (/unban)**, **Close Ticket (/close)**, and **Trust (/trust)**. |
+| **☁️ Serverless** | Runs entirely on Cloudflare Workers. **Zero cost**, server-free, and handles high concurrency. |
+| **📸 Multimedia Support** | Perfectly supports two-way forwarding of text, images, videos, and files. |
 
 ---
 
@@ -60,42 +65,41 @@ Deploy a free, enterprise-grade customer service system utilizing Cloudflare's p
 | `/reset` | **Reset Verification** | Testing flow or suspected compromise. |
 | `/info` | **View Info** | Checking user UID and topic link. |
 | `/cleanup` | **Batch Cleanup** | Scans and removes data for deleted topics. |
-| `/addword <word>` | **Add Keyword** | Block new types of spam/ads in real-time. |
+| `/addword <word>` | **Add Keyword** | Block new spam/ads in real-time. |
 | `/delword <word>` | **Remove Keyword** | Remove an incorrect or unnecessary block rule. |
 | `/listwords` | **List Keywords** | Display all active blocked words (Hardcoded + Dynamic). |
 
----
-
-## 🚫 Keyword Filtering System
-
-To effectively block spam, this project includes a powerful keyword interception engine:
-
-*   **Dual-Layer Validation**: Built-in hardcoded blacklist (cannot be deleted via command) + customizable dynamic KV word list.
-*   **Comprehensive Interception**: Detects both standard text messages and the `caption` (description) of photos/videos.
-*   **Command Management**:
-    *   `/addword <word>`: Adds a keyword to the dynamic blacklist.
-    *   `/delword <word>`: Removes a keyword from the dynamic blacklist.
-    *   `/listwords`: View the full list of currently active blocked words.
-
-*Example: Send `/addword gambling` in the admin topic to automatically block all messages containing "gambling".*
+#### 🚫 Keyword Filtering Description
+- Added intelligent keyword interception, supporting text and media `caption` detection.
+- Keywords added via commands are stored in KV and take effect globally within 60 seconds.
 
 ---
 
 ## 🚀 Deployment Tutorial
 
-### 1. Prerequisites
-*   **Telegram Bot**: Apply for a bot from [@BotFather](https://t.me/BotFather) and get the `Token`. *Important: Turn off Group Privacy.*
-*   **Administrator Group**: Create a group, enable Topics, add the bot, and grant "Manage Topics" permission.
+### Prerequisites
+1.  **Telegram Bot**: Apply for a bot from[@BotFather](https://t.me/BotFather) and get the `Token`. *Important: Turn off Group Privacy.*
+2.  **Administrator Group**: Create a group, enable Topics, add the bot, and grant "Manage Topics" permission.
 
-### 2. Deployment Steps
+### Method 1: One-Click Deploy via GitHub (Recommended ★)
 1.  **Fork this repository** to your GitHub.
 2.  In Cloudflare Workers & Pages, select **Connect to Git** to link this repository.
 3.  **Configure Binding & Variables**:
     *   In **Settings -> Variables**, bind a KV Namespace (Variable name **must** be `TOPIC_MAP`).
     *   Add Environment Variables `BOT_TOKEN` and `SUPERGROUP_ID` (starts with `-100`).
-4.  **Activate Webhook**:
-    Visit the following URL in your browser (replace Token and Worker URL):
-    `https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook?url=https://<YOUR_WORKER_URL>`
+4.  **Final Step**: In the **Deployments** tab, click **Retry deployment**.
+
+### Method 2: Manual Deployment (Simple & Direct)
+1.  Create a Worker in Cloudflare.
+2.  Click **Edit code**, paste the `worker.js` content.
+3.  Click **Deploy**.
+4.  In **Settings -> Variables**, add the `TOPIC_MAP` binding and required environment variables.
+
+---
+
+### Final Step: Activate Webhook (Crucial)
+Visit the following URL in your browser (replace Token and Worker URL):
+`https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook?url=https://<YOUR_WORKER_URL>`
 
 ---
 
@@ -105,16 +109,16 @@ To effectively block spam, this project includes a powerful keyword interception
 A: Ensure the Webhook is set correctly. You can try deleting the old Webhook first and setting it again.
 
 **Q: Why isn't keyword filtering working?**
-A: Ensure you sent the command in the admin group topic. The system has a 60-second memory cache for keywords, so please wait a moment for changes to propagate.
+A: Ensure you sent the command in the admin group topic. The system has a 60-second memory cache, so wait a moment for changes to propagate.
 
-**Q: Can I use a custom domain?**
-A: If custom domain setup fails, please use the default `workers.dev` domain for initial debugging to ensure your network environment is correct.
+**Q: Why can't the bot create topics?**
+A: Ensure the bot has "Manage Topics" permission and that the group has Topics enabled.
 
 ---
 
 ## 🔒 Security Note
 
-> [!IMPORTANT]
+>[!IMPORTANT]
 > Please keep your `BOT_TOKEN` safe. Never share it or commit it to public repositories.
 
 ---
