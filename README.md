@@ -13,22 +13,15 @@
 ---
 
 <details>
-<summary>📢 <b>v5.1 版本重要更新公告 (2026-01-05)</b></summary>
+<summary>📢 <b>v5.3 版本更新公告 (2026-05-16)</b></summary>
    
-### 主要修复：
-- **自动话题修复**：被删除话题用户不再转发到 General，会自动新建话题。
-- **话题无限循环修复**：针对创建失败添加重试机制，最多重试 3 次。
-- **消息路由规范化**：修复字符串与数字混用问题，统一规范化为 String 类型。
-- **并发验证加固**：添加验证锁机制，彻底杜绝并发绕过漏洞。
-- **数据读取保护**：实现 `safeGetJSON()` 安全读取机制，防止 KV 数据损坏导致崩溃。
-- **验证系统重构**：改用索引方案，完全避免按钮回调截断问题，100% 可用。
+### 新增功能：
+- **关键词过滤系统**：新增硬编码+KV动态词库，支持拦截文本及媒体描述 (Caption)。
+- **实时管理**：支持 `/addword`、`/delword`、`/listwords` 等管理员指令，无需重启即可动态更新屏蔽列表。
+- **性能优化**：引入内存缓存机制，降低 KV 读取频率，保证高并发下的响应速度。
    
-### 更新功能：
-**批量清理工具**：/cleanup  # 扫描并清理已删除话题的用户数据
-
-### ⚠️ 更新指南：
-Fork用户可直接点击sync 更新同步，自动更新
-手动部署用户复制worker.js代码到worker,重新部署一次
+### 历史修复：
+- 自动话题修复、消息路由规范化、并发验证加固、多媒体转发优化等。
 </details>
 
 ---
@@ -37,145 +30,90 @@ Fork用户可直接点击sync 更新同步，自动更新
 
 * [✨ 核心特性](#-核心特性)
 * [🛠️ 管理员指令](#-管理员指令)
+* [🚫 关键词过滤系统](#-关键词过滤系统)
 * [🚀 部署教程](#-部署教程)
-    * [方法一：GitHub 一键连接 (推荐)](#方法一github-一键连接部署-推荐-)
-    * [方法二：手动复制部署](#方法二手动复制部署-简单直接)
-    * [最后一步：激活 Webhook](#最后一步激活-webhook-至关重要)
 * [❓ 常见问题 (FAQ)](#-常见问题-faq)
-* [📈 Star History](#-star-history)
 
 ---
 
 ## ✨ 核心特性
 
-v4.0 版本移除了所有不稳定的外部 API 依赖，专注于**极致的速度**与**绝对的稳定性**。
-
 | 特性 | 描述 |
 | :--- | :--- |
-| **⚡ 0 延迟验证** | 采用**本地精选常识题库**。秒开秒验，彻底告别网络超时与接口报错，验证成功率 100%。 |
-| **🛡️ 智能防骚扰** | **短 ID 机制**修复了 Telegram 按钮点击失效的 Bug。验证通过后提供 **30 天免打扰期**，兼顾安全与用户体验。 |
-| **💬 话题群组管理** | 利用 **Telegram Forum Topics** 功能，自动为每位私聊用户创建一个独立的话题，消息隔离，管理井井有条。 |
-| **👮 隐形指令系统** | 自动**拦截**用户端发送的 `/` 开头指令，防止普通用户骚扰管理员。管理指令仅在管理员群组内生效。 |
-| **🔒 权限控制** | 强大的指令集：支持 **封禁 (/ban)**、**解封 (/unban)**、**结单 (/close)** 和 **永久信任 (/trust)** 等操作。 |
-| **☁️ Serverless** | 完全基于 Cloudflare Workers 运行。**0 成本**、无需服务器、无需运维、抗高并发。 |
-| **📸 多媒体支持** | 完美支持文本、图片、视频、文件等多种消息格式的双向转发，不丢失任何细节。 |
+| **⚡ 0 延迟验证** | 采用本地精选常识题库。秒开秒验，验证成功率 100%。 |
+| **🚫 关键词过滤** | 内置硬编码与 KV 动态双层词库，支持过滤 `Caption`，管理员可实时管理词库。 |
+| **🛡️ 智能防骚扰** | 验证通过后提供 30 天免打扰期，兼容安全与用户体验。 |
+| **💬 话题群组管理** | 利用 Forum Topics 自动为用户创建独立话题，消息管理井井有条。 |
+| **👮 隐形指令系统** | 自动拦截用户端发送的 `/` 开头指令，防止骚扰，管理指令仅群内生效。 |
+| **☁️ Serverless** | 完全基于 Cloudflare Workers，0 成本、无需运维、抗高并发。 |
 
 ---
 
 ## 🛠️ 管理员指令
 
-> **注意**：以下指令仅在 **管理员群组的话题内** 有效。用户在私聊窗口发送指令会被静默拦截，不会对管理员造成骚扰。
+> **注意**：以下指令仅在 **管理员群组的话题内** 有效。
 
 | 指令 | 作用 | 适用场景 |
 | :--- | :--- | :--- |
-| `/close` | **强制关闭对话**<br>机器人会提示用户对话已结束，并拒收新消息。 | 工单处理完成，礼貌结束咨询。 |
-| `/open` | **重新开启对话**<br>恢复对该用户的消息转发。 | 误操作关闭，或用户需再次联系。 |
-| `/ban` | **封禁用户**<br>机器人将完全无视该用户的所有消息（无提示）。 | 遇到恶意刷屏、广告机器人。 |
-| `/unban` | **解封用户**<br>恢复该用户的正常通讯权限。 | 给予改过自新的机会。 |
-| `/trust` | **永久信任**<br>该用户将永久免除人机验证（永不过期）。 | 熟人、VIP 客户、长期合作伙伴。 |
-| `/reset` | **重置验证**<br>强制清除该用户的验证状态，下次需重新验证。 | 测试验证流程，或怀疑账号被盗。 |
-| `/info` | **查看信息**<br>显示当前用户的 UID、话题 ID 和链接。 | 查询用户资料。 |
-| `/cleanup` | **批量清理**<br>扫描并清理已删除话题的用户数据。 | 清理失效用户。 |
+| `/close` | 强制关闭对话 | 工单处理完成，礼貌结束咨询。 |
+| `/open` | 重新开启对话 | 恢复对该用户的消息转发。 |
+| `/ban` | 封禁用户 | 遇到恶意刷屏、广告机器人。 |
+| `/unban` | 解封用户 | 恢复该用户的正常通讯权限。 |
+| `/trust` | 永久信任 | 熟人、VIP 客户、长期合作伙伴。 |
+| `/reset` | 重置验证 | 测试流程或怀疑账号被盗。 |
+| `/info` | 查看用户信息 | 查询用户的 UID 及话题链接。 |
+| `/cleanup` | 批量清理 | 扫描并清理已删除话题的残留数据。 |
+
+---
+
+## 🚫 关键词过滤系统
+
+为了有效阻断垃圾信息，本项目内置了关键词拦截功能：
+
+*   **双层校验**：程序内置基础屏蔽词库（硬编码），同时支持通过命令添加动态屏蔽词。
+*   **全方位拦截**：支持文本消息及图片/视频的 `caption`（描述文字）检测。
+*   **指令管理**：
+    *   `/addword <关键词>`：将词汇加入动态词库。
+    *   `/delword <关键词>`：从动态词库中移除词汇。
+    *   `/listwords`：查看当前已生效的全部屏蔽词列表。
+
+*示例：在管理员话题内发送 `/addword 赌博`，机器人将自动拦截后续所有包含“赌博”的消息。*
 
 ---
 
 ## 🚀 部署教程
 
-### 前置准备
-1.  **Telegram Bot**：找 [@BotFather](https://t.me/BotFather) 申请一个机器人，获取 `Token`。
-    * *重要设置*：在 BotFather 中关闭 **Group Privacy** (`/mybots` > Settings > Group Privacy > Turn off)。
-2.  **管理员群组**：创建一个 Telegram 群组，并**开启话题功能 (Topics)**。
-    * 将机器人拉入群组，并设为**管理员**（给予管理话题权限）。
-    * 获取群组 ID（通常以 `-100` 开头）。
-     ``获取 SUPERGROUP_ID 小技巧：
-在 Telegram 桌面端右键群内任意消息，复制消息链接；链接里会有一段 -100xxxxxxxxxx 或 xxxxxxxxxx；若只看到纯数字 xxxxxxxxxx，在前面加上 -100，就是完整的 SUPERGROUP_ID（私密频道/群组同理）。``
+### 1. 前置准备
+*   **Telegram Bot**：找 [@BotFather](https://t.me/BotFather) 申请 Token。*注意：请在 BotFather 中关闭 Group Privacy (Turn off)。*
+*   **管理员群组**：创建群组并开启话题功能 (Topics)，将机器人拉入并给予管理权限。
 
-### 方法一：GitHub 一键连接部署 (推荐 ★)
-
-这是最简单的自动化部署方式，当您更新 GitHub 仓库时，Cloudflare 会自动重新部署您的 Worker。
-
-1.  **Fork 本仓库** 到您的 GitHub 账户。
-2.  登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
-3.  导航到 **Workers & Pages** -> **Create Application**。
-4.  点击 **Connect to Git** 标签页。
-5.  授权 Cloudflare 访问您的 GitHub，并选择您刚才 Fork 的 `telegram_private_chatbot` 仓库。
-6.  **配置部署设置**：
-    * 项目名称：`telegram-private-chatbot` (或任意名称)。
-    * 生产分支：通常是 `main` 或 `master`。
-    * 其余保持默认，点击 **Save and Deploy**。
-7.  **⚠️ 关键步骤：绑定数据库与变量**
-    * 部署完成后，进入该 Worker 的 **Settings** -> **Variables** 页面。
-    * **绑定 KV 数据库** (必须)：
-        * 在 Cloudflare 左侧菜单 **KV** 中创建一个新的 Namespace（例如叫 `TOPIC_MAP`）。
-        * 回到 Worker 的 Variables 页面，向下滚动到 **KV Namespace Bindings**。
-        * 点击 **Add binding**，变量名填写 `TOPIC_MAP` (必须全大写)，Namespace 选择刚才创建的那个。
-    * **添加环境变量**：
-        * `BOT_TOKEN`: 你的机器人 Token。
-        * `SUPERGROUP_ID`: 你的群组 ID (例如 -100123...)。
-8.  **最后一步**：配置完成后，点击页面顶部的 **Deployments** 标签，找到最新的部署记录，点击右侧的 **Retry deployment** (重新部署)，让变量生效。
-
-### 方法二：手动复制部署 (简单直接)
-
-如果您不想关联 GitHub，可以直接复制代码。
-
-1.  登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
-2.  进入 **Workers & Pages** -> **Create Application** -> **Create Worker** ，选择从`hello world`开始。
-3.  命名你的 Worker，点击 **Deploy**。
-4.  点击 **Edit code**，将本项目 `worker.js` 的所有代码复制粘贴进去，覆盖原代码。
-5.  点击右上角 **Deploy** 保存。
-6.  **配置 KV 与变量**：
-    * 去 **Settings** -> **Variables**。
-    * 添加 KV 绑定：Variable name 填 `TOPIC_MAP`，并绑定一个 KV 数据库。
-    * 添加环境变量：`BOT_TOKEN` 和 `SUPERGROUP_ID`。
-    * 点击 **Save and Deploy**。
-
----
-
-### 最后一步：激活 Webhook (至关重要)
-
-无论使用哪种部署方式，最后都需要手动告诉 Telegram 你的 Worker 地址。请在浏览器中**严格按顺序**访问以下 URL：
-
- **设置新 Webhook**：
-    ```
-   (https://api.telegram.org/bot)<YOUR_TOKEN>/setWebhook?url=<YOUR_WORKER_URL>
-    ```
-    *将 `<YOUR_TOKEN>` 替换为机器人 Token，`<YOUR_WORKER_URL>` 替换为 Worker 的完整域名或者你绑定的自定义的域名 (如 `https://xxx.workers.dev`)。*
-    
- *举例：https://api.telegram.org/bot1234:HUSH2GW/setWebhook?url=https://1234.workers.dev* `<YOUR_TOKEN>前面的bot别删了`
-
-如果返回 `{"ok":true, "result":true, "description":"Webhook was set"}`，即表示部署成功！
+### 2. 部署步骤
+1.  **Fork 本仓库** 到您的 GitHub。
+2.  在 Cloudflare Workers & Pages 中选择 **Connect to Git** 关联此仓库。
+3.  **配置绑定与变量**：
+    *   在 **Settings -> Variables** 中绑定 KV Namespace（名称必须为 `TOPIC_MAP`）。
+    *   添加环境变量 `BOT_TOKEN` 和 `SUPERGROUP_ID` (群组 ID 需以 `-100` 开头)。
+4.  **激活 Webhook**：
+    在浏览器访问以下链接（替换 Token 和域名）：
+    `https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook?url=https://<YOUR_WORKER_URL>`
 
 ---
 
 ## ❓ 常见问题 (FAQ)
 
-**Q1: 为什么点击验证按钮没有反应？**
-A: 请检查 Webhook 是否正确设置。必须确保 Telegram 允许发送 `callback_query` 事件。请务必执行上述“最后一步”中的重置操作。
+**Q: 为什么点击验证按钮没有反应？**
+A: 请确保 Webhook 设置正确。若不成功，可先访问 `deleteWebhook` 清理旧设置，再重新设置。
 
-**Q2: 为什么机器人无法在群里创建话题？**
-A: 请确保：1. 群组 ID 正确（-100开头）；2. 群组已开启 Topics 功能；3. 机器人是群管理员且拥有 "Manage Topics" 权限。
+**Q: 为什么关键词过滤没有拦截成功？**
+A: 请检查是否在管理员群组发送的指令生效了，并通过 `/listwords` 确认词库是否已更新。动态词库有 60 秒缓存，稍等片刻即可生效。
 
-**Q3: 为什么人机验证能通过收不到转发的消息？**
-A: 请仔细检查所有变量名称和id是否准确，删除webhook再重新激活。
- `(https://api.telegram.org/bot)<YOUR_TOKEN>/deleteWebhook?drop_pending_updates=true` 
-  
-  如果依然无法正常转发消息，尝试完成所有步骤后，最后再添加bot的管理员权限。
-  
-**Q4: 为什么webhook设置失败？**
-A: 如果你设置了自定义域名不成功，Webhook 改回 workers.dev 域名再尝试。这种情况是你域名解析失败或者网络环境阻断造成的
- 
+**Q: 为什么无法自定义域名？**
+A: 若自定义域名设置不成功，请先使用 `workers.dev` 默认域名进行调试，确保网络环境无误。
+
 ---
 
 ## 🔒 安全说明
-
-> [!IMPORTANT]
-> 请妥善保管您的 Bot API Token ，不要泄露，这些信息关系到您服务的安全性。
-
----
-
-## 📈 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=jikssha/telegram_private_chatbot&type=date&legend=top-left)](https://www.star-history.com/#jikssha/telegram_private_chatbot&type=date&legend=top-left)
+请妥善保管您的 `BOT_TOKEN`，不要上传到公开仓库或分享给他人。
 
 ---
 **如果这个项目对你有帮助，请给个 Star ⭐️ 吧！**
