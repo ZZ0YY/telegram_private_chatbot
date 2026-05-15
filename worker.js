@@ -50,6 +50,68 @@ const LOCAL_QUESTIONS = [
     {"question": "小狗发出的叫声通常是？", "correct_answer": "汪汪", "incorrect_answers": ["喵喵", "咩咩", "呱呱"]}
 ];
 
+// --- 屏蔽词列表（硬编码，用户可自行修改此数组） ---
+const BLOCKED_WORDS = [
+    "赌博",
+    "色情",
+    "代开发",
+    "加微信",
+    // ↑ 在此添加更多屏蔽词，每行一个，用引号包裹、逗号结尾
+];
+
+// 屏蔽词内存缓存（减少 KV 读取频率）
+const blockedWordsCache = { data: null, ts: 0, ttl: 60000 }; // 缓存 60 秒
+
+/**
+ * 获取完整屏蔽词列表 = 硬编码 + KV 动态词库（合并去重）
+ * @param {object} env - Worker 环境
+ * @param {boolean} forceRefresh - 是否强制刷新缓存
+ * @returns {Promise<string[]>}
+ */
+async function getBlockedWords(env, forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && blockedWordsCache.data && (now - blockedWordsCache.ts < blockedWordsCache.ttl)) {
+        return blockedWordsCache.data;
+    }
+
+    // 从 KV 读取动态屏蔽词
+    let kvWords = [];
+    try {
+        const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                kvWords = parsed.filter(w => typeof w === "string" && w.trim().length > 0);
+            }
+        }
+    } catch (e) {
+        Logger.warn('blocked_words_kv_parse_error', { error: e.message });
+    }
+
+    // 合并去重（硬编码优先，KV 补充）
+    const merged = [...new Set([...BLOCKED_WORDS, ...kvWords])];
+    blockedWordsCache.data = merged;
+    blockedWordsCache.ts = now;
+    return merged;
+}
+
+/**
+ * 检查文本是否包含屏蔽词
+ * @param {string} text - 待检查文本
+ * @param {string[]} words - 屏蔽词列表
+ * @returns {{ hit: boolean, word: string|null }}
+ */
+function containsBlockedWord(text, words) {
+    if (!text || !words || words.length === 0) return { hit: false, word: null };
+    const lower = text.toLowerCase();
+    for (const w of words) {
+        if (w && lower.includes(w.toLowerCase())) {
+            return { hit: true, word: w };
+        }
+    }
+    return { hit: false, word: null };
+}
+
 // --- 辅助工具函数 ---
 
 // 结构化日志系统
@@ -589,7 +651,22 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
         }
     }
 
+    // --- 屏蔽词检查（文本 + caption 均检查） ---
+    const blockedWords = await getBlockedWords(env);
+    const textToCheck = [msg.text, msg.caption].filter(Boolean).join(" ");
+    const blockResult = containsBlockedWord(textToCheck, blockedWords);
+    if (blockResult.hit) {
+        Logger.info('message_blocked_by_word', { userId, word: blockResult.word });
+        await tgCall(env, "sendMessage", {
+            chat_id: userId,
+            text: "🚫 您的消息包含违规内容，已被拦截，请修改后重新发送。"
+        });
+        return;
+    }
+
     if (msg.media_group_id) {
+        // 媒体组也需要检查 caption
+        if (blockResult.hit) return; // 上面已拦截，此处冗余保险
         await handleMediaGroup(msg, env, ctx, {
             direction: "p2t",
             targetChat: env.SUPERGROUP_ID,
@@ -796,6 +873,97 @@ async function handleAdminReply(msg, env, ctx) {
 
       const info = `👤 **用户信息**\nUID: \`${userId}\`\nTopic ID: \`${threadId}\`\n话题标题: ${userRec?.title || "未知"}\n验证状态: ${verifyStatus ? (verifyStatus === 'trusted' ? '🌟 永久信任' : '✅ 已验证') : '❌ 未验证'}\n封禁状态: ${banStatus ? '🚫 已封禁' : '✅ 正常'}\nLink: [点击私聊](tg://user?id=${userId})`;
       await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: info, parse_mode: "Markdown" });
+      return;
+  }
+
+  // --- 屏蔽词管理命令 ---
+
+  // /addword 词 — 添加屏蔽词到 KV 动态词库
+  if (text.startsWith("/addword ")) {
+      const word = text.slice(9).trim();
+      if (!word) {
+          await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "⚠️ 用法: `/addword 屏蔽词`", parse_mode: "Markdown" });
+          return;
+      }
+      let kvWords = [];
+      try {
+          const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+          if (raw) kvWords = JSON.parse(raw);
+      } catch (e) { /* 忽略解析错误，从空数组开始 */ }
+      if (!Array.isArray(kvWords)) kvWords = [];
+
+      // 检查是否已存在（合并硬编码一起判断）
+      const allWords = [...new Set([...BLOCKED_WORDS, ...kvWords])];
+      if (allWords.map(w => w.toLowerCase()).includes(word.toLowerCase())) {
+          await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `⚠️ 屏蔽词「${word}」已存在。`, parse_mode: "Markdown" });
+          return;
+      }
+
+      kvWords.push(word);
+      await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
+      // 强制刷新缓存
+      blockedWordsCache.data = null;
+      Logger.info('blocked_word_added', { word, by: senderId });
+      await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `✅ 已添加屏蔽词「${word}」\n当前动态词库共 ${kvWords.length} 个词`, parse_mode: "Markdown" });
+      return;
+  }
+
+  // /delword 词 — 从 KV 动态词库删除屏蔽词（硬编码词无法通过此命令删除，需修改代码）
+  if (text.startsWith("/delword ")) {
+      const word = text.slice(9).trim();
+      if (!word) {
+          await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: "⚠️ 用法: `/delword 屏蔽词`", parse_mode: "Markdown" });
+          return;
+      }
+
+      // 检查是否为硬编码词
+      if (BLOCKED_WORDS.map(w => w.toLowerCase()).includes(word.toLowerCase())) {
+          await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `⚠️「${word}」是硬编码屏蔽词，无法通过命令删除，请直接修改代码中的 BLOCKED_WORDS 数组。`, parse_mode: "Markdown" });
+          return;
+      }
+
+      let kvWords = [];
+      try {
+          const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+          if (raw) kvWords = JSON.parse(raw);
+      } catch (e) { /* 忽略 */ }
+      if (!Array.isArray(kvWords)) kvWords = [];
+
+      const before = kvWords.length;
+      kvWords = kvWords.filter(w => w.toLowerCase() !== word.toLowerCase());
+
+      if (kvWords.length === before) {
+          await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `⚠️ 屏蔽词「${word}」不存在于动态词库中。`, parse_mode: "Markdown" });
+          return;
+      }
+
+      await env.TOPIC_MAP.put("blocked_words_kv", JSON.stringify(kvWords));
+      blockedWordsCache.data = null; // 强制刷新缓存
+      Logger.info('blocked_word_removed', { word, by: senderId });
+      await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: `✅ 已删除屏蔽词「${word}」\n当前动态词库共 ${kvWords.length} 个词`, parse_mode: "Markdown" });
+      return;
+  }
+
+  // /listwords — 列出所有屏蔽词（硬编码 + 动态）
+  if (text === "/listwords") {
+      const allWords = await getBlockedWords(env, true); // 强制刷新
+      let kvWords = [];
+      try {
+          const raw = await env.TOPIC_MAP.get("blocked_words_kv");
+          if (raw) kvWords = JSON.parse(raw);
+      } catch (e) { /* 忽略 */ }
+      if (!Array.isArray(kvWords)) kvWords = [];
+
+      const hardcoded = BLOCKED_WORDS;
+      const dynamic = kvWords.filter(w => !BLOCKED_WORDS.map(h => h.toLowerCase()).includes(w.toLowerCase()));
+
+      let reply = `📝 **屏蔽词列表** (共 ${allWords.length} 个)\n\n`;
+      reply += `🔧 **硬编码词** (${hardcoded.length} 个，修改需改代码):\n`;
+      reply += hardcoded.length > 0 ? hardcoded.map(w => `  • ${w}`).join("\n") : "  (无)";
+      reply += `\n\n💾 **动态词** (${dynamic.length} 个，可通过 /addword /delword 管理):\n`;
+      reply += dynamic.length > 0 ? dynamic.map(w => `  • ${w}`).join("\n") : "  (无)";
+
+      await tgCall(env, "sendMessage", { chat_id: env.SUPERGROUP_ID, message_thread_id: threadId, text: reply, parse_mode: "Markdown" });
       return;
   }
 
