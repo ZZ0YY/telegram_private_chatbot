@@ -1,4 +1,4 @@
-// Cloudflare Worker：Telegram 双向机器人 v5.3
+// Cloudflare Worker：Telegram 双向机器人 v5.4
 
 // --- 配置常量 ---
 const CONFIG = {
@@ -544,6 +544,19 @@ async function handlePrivateMessage(msg, env, ctx) {
   const isBanned = await env.TOPIC_MAP.get(`banned:${userId}`);
   if (isBanned) return;
 
+  // 屏蔽词检查（在验证之前检查，避免带屏蔽词的消息被暂存并转发）
+  const blockedWords = await getBlockedWords(env);
+  const textToCheck = [msg.text, msg.caption].filter(Boolean).join(" ");
+  const blockResult = containsBlockedWord(textToCheck, blockedWords);
+  if (blockResult.hit) {
+      Logger.info('message_blocked_by_word', { userId, word: blockResult.word });
+      await tgCall(env, "sendMessage", {
+          chat_id: userId,
+          text: "🚫 您的消息包含违规内容，已被拦截，请修改后重新发送。"
+      });
+      return;
+  }
+
   const verified = await env.TOPIC_MAP.get(`verified:${userId}`);
 
   if (!verified) {
@@ -564,7 +577,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
         return;
     }
 
-    // 【修复 #4】使用安全的 JSON 解析
+    // 使用安全的 JSON 解析
     let rec = await safeGetJSON(env, key, null);
 
     if (rec && rec.closed) {
@@ -572,7 +585,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
         return;
     }
 
-    // 【修复 #5】重试计数器，防止无限循环
+    // 重试计数器，防止无限循环
     const retryKey = `retry:${userId}`;
     let retryCount = parseInt(await env.TOPIC_MAP.get(retryKey) || "0");
 
@@ -600,7 +613,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
         }
     }
 
-    // 【修复1】验证话题是否仍然存在（带缓存，降低探测频率）
+    // 验证话题是否仍然存在（带缓存，降低探测频率）
     // 当话题被删除后，KV中的thread_id仍然存在，但实际话题已不可用
     if (rec && rec.thread_id) {
         const cacheKey = rec.thread_id;
@@ -745,7 +758,7 @@ async function forwardToTopic(msg, userId, key, env, ctx) {
         }
     }
 
-    // 【修复2】增强错误处理，双重保险
+    // 增强错误处理，双重保险
     // 如果上面的测试没有捕获到，这里再次检测
     if (!res.ok) {
         const desc = normalizeTgDescription(res.description);
@@ -788,7 +801,7 @@ async function handleAdminReply(msg, env, ctx) {
       return;
   }
 
-  // 【修复】允许在任何话题执行 /cleanup 命令
+  // 允许在任何话题执行 /cleanup 命令
   if (text === "/cleanup") {
       // /cleanup 可能处理较久，使用 waitUntil 防止 webhook 请求超时导致“卡住”
       ctx.waitUntil(handleCleanupCommand(threadId, env));
